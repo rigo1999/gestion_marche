@@ -191,52 +191,50 @@ class Marche:
 
         if marchands:
             for marchand in marchands:
+                print("marchand:", marchand)
                 noms_marchands.append(marchand["nom"])
                 positions_x.append(marchand["position"][0])
                 positions_y.append(marchand["position"][1])
-                #get products with same marchand id
+
+                # Récupérer les produits du marchand
                 produits = collection.find({"marchand_id": marchand["_id"]})
+                stock_total = sum(produit["quantite"] for produit in produits)
 
                 # Déterminer la couleur en fonction du stock total
-                stock_total = sum(produit["quantite"] for produit in produits)
                 if stock_total > 50:
                     couleurs.append("green")  # Stock élevé
                 elif 20 <= stock_total <= 50:
                     couleurs.append("orange")  # Stock moyen
                 else:
                     couleurs.append("red")  # Stock faible
-        else:
-            print(f"Aucun marchand trouvé pour le marché '{nom_marche}'.")
-            return
 
-        # Création de la carte interactive avec Plotly
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(
-            x=positions_x,
-            y=positions_y,
-            mode="markers+text",
-            text=noms_marchands,
-            textposition="top center",
-            marker=dict(
-                size=15,
-                color=couleurs,
-                line=dict(width=1, color="black")
+        # Vérifier s'il y a des marchands
+            
+                # Création de la carte interactive avec Plotly
+            fig = go.Figure()
+            
+            fig.add_trace(go.Scatter(
+                x=positions_x,  # Liste de positions X
+                y=positions_y,  # Liste de positions Y
+                mode="markers+text",
+                text=noms_marchands,
+                textposition="top center",
+                marker=dict(
+                    size=15,
+                    color=couleurs,
+                    line=dict(width=2, color="black")
+                )
+            ))
+
+            fig.update_layout(
+                title=f"Carte interactive des marchands du marché '{nom_marche}'",
+                xaxis_title="Coordonnée X",
+                yaxis_title="Coordonnée Y",
+                showlegend=False
             )
-        ))
 
-        fig.update_layout(
-            title=f"Carte interactive des marchands du marché '{nom_marche}'",
-            xaxis_title="Coordonnée X",
-            yaxis_title="Coordonnée Y",
-            showlegend=False
-        )
-
-        # Afficher la carte dans le navigateur
-        fig.show(renderer="browser")
-
-    # Exemple d'utilisation
-    nom_marche = input("Nom du marché : ")
-    generer_carte_interactive(nom_marche)
+# Afficher la carte dans le navigateur
+            fig.show(renderer="browser")
         
     def afficher_stock_graphique(self):
         """

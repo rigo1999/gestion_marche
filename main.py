@@ -36,6 +36,7 @@ def main():
                 #instance of marche
                 marche = Marche(nom_marche, taille_x, taille_y,marchand_id=None) 
                 #insert marche in db
+                client = MongoClient("mongodb://localhost:27017/")
                 db = client["market_bd"]
                 collection = db["marches"]
                 collection.insert_one(marche.__dict__)
