@@ -2,6 +2,9 @@
 # Importation des classes et bibliotheques
 import matplotlib.pyplot as plt
 import plotly.graph_objects as go
+import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
 import math
 from datetime import datetime
 
@@ -312,6 +315,9 @@ def main():
         elif choix == "6":
             print("\n=== Visualisation de la carte des marchands ===")
             nom_marche = input("Nom du marché : ")
+
+            
+            
             client = MongoClient("mongodb://localhost:27017/")
             db = client["market_bd"]
             collection = db["marches"]
@@ -324,12 +330,125 @@ def main():
 
             # Afficher la carte des marchands
             
-            Marche.generer_carte_interactive(nom_marche)
+            #Marche.generer_carte_interactive(nom_marche)
+            client = MongoClient("mongodb://localhost:27017/")
+            db = client["market_bd"]
+            collection_marches = db["marches"]
+            collection_marchands = db["marchands"]
+            collection_produits = db["produits"]
+             
+
+            # Recherche du marché dans la base de données
+            marche = collection_marches.find_one({"nom_marce": nom_marche})
+
+            if not marche:
+                print(f"Le marché '{nom_marche}' n'existe pas.")
+                exit()
+
+            # Initialisation des listes pour les données
+            noms_marchands = []
+            positions_x = []
+            positions_y = []
+            couleurs = []
+
+            # Récupérer tous les marchands du marché
+            marchands = list(collection_marchands.find({"marchand_id": marche["_id"]}))
+
+            if not marchands:
+                print("Aucun marchand trouvé.")
+                exit()
+
+            for marchand in marchands:
+                print("Marchand:", marchand)
+
+                noms_marchands.append(marchand["nom"])
+                positions_x.append(marchand["position"][0])
+                positions_y.append(marchand["position"][1])
+
+                # Récupérer les produits du marchand
+                produits = list(collection_produits.find({"marchand_id": marchand["_id"]}))
+                stock_total = sum(produit["quantite"] for produit in produits)
+
+                # Déterminer la couleur en fonction du stock total
+                if stock_total > 50:
+                    couleurs.append("green")  # Stock élevé
+                elif 20 <= stock_total <= 50:
+                    couleurs.append("orange")  # Stock moyen
+                else:
+                    couleurs.append("red")  # Stock faible
+
+            # Création de la carte interactive avec Plotly
+            client_x = float(input("Entrez votre position X : "))
+            client_y = float(input("Entrez votre position Y : "))
+
+            noms_marchands.append("Vous")
+            positions_x.append(client_x)
+            positions_y.append(client_y)
+            couleurs.append("blue")
+
+            fig = go.Figure()
+
+            fig.add_trace(go.Scatter(
+                x=positions_x,
+                y=positions_y,
+                mode="markers+text",
+                text=noms_marchands,
+                textposition="top center",
+                marker=dict(
+                    size=15,
+                    color=couleurs,
+                    line=dict(width=2, color="black")
+                )
+            ))
+
+            fig.update_layout(
+                title=f"Carte interactive des marchands du marché '{nom_marche}'",
+                xaxis_title="Coordonnée X",
+                yaxis_title="Coordonnée Y",
+                showlegend=False
+            )
+            fig.write_image("marche_map.png")
+            fig.show()
 
 
         elif choix == "7":
             print("\n=== Affichage des stocks ===")
             nom_marche = input("Nom du marché : ")
+            # Connexion à la base MongoDB
+            client = MongoClient("mongodb://localhost:27017/")
+            db = client["market_bd"]
+
+            # Chargement des collections
+            marchands = list(db.marchands.find())
+            produits = list(db.produits.find())
+            marches = list(db.marches.find())
+
+            # Convertir en DataFrame
+            df_marchands = pd.DataFrame(marchands)
+            df_produits = pd.DataFrame(produits)
+            df_marches = pd.DataFrame(marches)
+            # Compter le nombre de marchands par marché
+            marchands_par_marche = df_marchands.groupby("marchand_id").size().reset_index(name="Nombre de marchands")
+
+            # Fusionner avec les marchés pour avoir les noms
+            marchands_par_marche = marchands_par_marche.merge(df_marches, left_on="marchand_id", right_on="_id")
+            print("marchands_par_marche",marchands_par_marche)
+
+            fig = px.bar(marchands_par_marche, x="nom", y="Nombre de marchands", title="Nombre de marchands par marché", 
+                        labels={"nom": "Marché", "Nombre de marchands": "Nombre de Marchands"}, color="Nombre de marchands")
+            fig.show()
+            fig = px.scatter(df_marchands, x="position_x", y="position_y", color="nom", hover_data=["nom"],
+                 title="Répartition géographique des marchands")
+            fig.show()
+            # Stock total par produit
+            stock_produit = df_produits.groupby("nom")["quantite"].sum().reset_index()
+
+            fig = px.bar(stock_produit, x="nom_marce", y="quantite", title="Stock total par produit", 
+                        labels={"nom": "Produit", "quantite": "Stock"}, color="quantite")
+            fig.show()
+
+
+
             marche = marches.get(nom_marche)
             if not marche:
                 print(f"Le marché '{nom_marche}' n'existe pas.")
