@@ -3,6 +3,7 @@ import plotly.graph_objects as go
 import math
 from datetime import datetime
 from bson import ObjectId
+from pymongo import MongoClient
 
 
 # Toutes les classes et méthodes ensuite
@@ -161,38 +162,54 @@ class Marche:
             print("Aucun marchand dans le marché.")
         for position, marchand in self.positions.items():
             print(f"Position: {position}, Marchand: {marchand.nom}")
-            mdetail_marchandarchand.afficher_informations()
+            detail_marchand.afficher_informations()
     import matplotlib.pyplot as plt
 # Autres méthodes de la classe ici...
 
-    def generer_carte_interactive(self):
-        """
-        Génère une carte interactive des emplacements des marchands.
-        """
+    def generer_carte_interactive(nom_marche):
+        # Connexion à MongoDB
+        client = MongoClient("mongodb://localhost:27017/")
+        db = client["market_bd"]
+        collection = db["marches"]
+
+        # Recherche du marché dans la base de données
+        marche = collection.find_one({"nom_marce": nom_marche})
+
+        if not marche:
+            print(f"Le marché '{nom_marche}' n'existe pas.")
+            return
+
+        # Initialisation des listes pour les données
         noms_marchands = []
         positions_x = []
         positions_y = []
         couleurs = []
 
-        # Parcourir les positions des marchands
-        for position, marchand in self.positions.items():
-            if isinstance(marchand, Marchand):
-                noms_marchands.append(marchand.nom)  # Ajouter le nom du marchand
-                positions_x.append(position[0])  # Ajouter la coordonnée X
-                positions_y.append(position[1])  # Ajouter la coordonnée Y
+        # Vérifier si la clé 'marchands' existe dans le document    
+        #get the marchands with the same marche id 
+        marchands = collection.find({"marchand_id": marche["_id"]})
 
-                # Calcul du stock total pour déterminer la couleur
-                stock_total = sum(produit.quantite for produit in marchand.stock)
+        if marchands:
+            for marchand in marchands:
+                noms_marchands.append(marchand["nom"])
+                positions_x.append(marchand["position"][0])
+                positions_y.append(marchand["position"][1])
+                #get products with same marchand id
+                produits = collection.find({"marchand_id": marchand["_id"]})
+
+                # Déterminer la couleur en fonction du stock total
+                stock_total = sum(produit["quantite"] for produit in produits)
                 if stock_total > 50:
                     couleurs.append("green")  # Stock élevé
                 elif 20 <= stock_total <= 50:
                     couleurs.append("orange")  # Stock moyen
                 else:
                     couleurs.append("red")  # Stock faible
-            else:
-                print(f"Erreur : La position {position} ne contient pas un objet 'Marchand'.")
+        else:
+            print(f"Aucun marchand trouvé pour le marché '{nom_marche}'.")
+            return
 
-        # Création du graphique Plotly
+        # Création de la carte interactive avec Plotly
         fig = go.Figure()
         fig.add_trace(go.Scatter(
             x=positions_x,
@@ -208,15 +225,18 @@ class Marche:
         ))
 
         fig.update_layout(
-            title="Carte interactive des marchands",
+            title=f"Carte interactive des marchands du marché '{nom_marche}'",
             xaxis_title="Coordonnée X",
             yaxis_title="Coordonnée Y",
             showlegend=False
         )
 
-        # Afficher la carte
+        # Afficher la carte dans le navigateur
         fig.show(renderer="browser")
 
+    # Exemple d'utilisation
+    nom_marche = input("Nom du marché : ")
+    generer_carte_interactive(nom_marche)
         
     def afficher_stock_graphique(self):
         """
@@ -293,53 +313,6 @@ class Marche:
         # Afficher la carte dans le navigateur
         fig.show(renderer="browser")
     # Autres méthodes...
-
-    def optimiser_achats(self, position_client, liste_produits):
-        """
-        Optimise les achats d'un client en trouvant les marchands les plus adaptés.
-        
-        Args:
-            position_client (tuple): Coordonnées (x, y) du client.
-            liste_produits (list of dict): Liste des produits souhaités avec leur quantité.
-                Exemple : [{"nom": "Pommes", "quantite": 10}, {"nom": "Bananes", "quantite": 5}]
-
-        Returns:
-            dict: Détails des marchands recommandés, coût total, et leurs coordonnées.
-        """
-        recommendations = []
-        
-        # Parcourir les marchands pour vérifier leur stock et calculer les distances
-        
-        for position, marchand in self.positions.items():
-            total_cout = 0
-            produits_disponibles = True
-
-            for demande in liste_produits:
-                produit_nom = demande["nom"]
-                produit_quantite = demande["quantite"]
-
-                # Vérifier si le marchand a le produit en stock
-                produit = next((p for p in marchand.stock if p.nom == produit_nom), None)
-                if produit and produit.quantite >= produit_quantite:
-                    total_cout += produit.prix * produit_quantite
-                else:
-                    produits_disponibles = False
-                    break
-
-            if produits_disponibles:
-                # Calculer la distance euclidienne entre le client et le marchand
-                distance = math.sqrt((position[0] - position_client[0])**2 + (position[1] - position_client[1])**2)
-                recommendations.append({
-                    "marchand": marchand.nom,
-                    "position": position,
-                    "distance": distance,
-                    "cout_total": total_cout
-                })
-
-        # Trier les marchands par coût total puis par distance
-        recommendations.sort(key=lambda x: (x["cout_total"], x["distance"]))
-
-        return recommendations
     
     #affichage marchand recommandé sur carte
     def afficher_marchands_recommandes(self, recommendations):
@@ -393,48 +366,59 @@ class Utilisateur:
         """
         print(f"Utilisateur: {self.identifiant}, Rôle: {self.role}")
 
+
+class Vente:
+    def __init__(self, produit, montant, quantite, client="Inconnu"):
+        self.produit = produit
+        self.montant = montant
+        self.quantite = quantite
+        self.client = client
+        self.date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    def to_dict(self):
+        return {
+            "produit": self.produit,
+            "montant": self.montant,
+            "quantite": self.quantite,
+            "client": self.client,
+            "date": self.date
+        }
+
+    def __repr__(self):
+        return f"Vente(produit={self.produit}, montant={self.montant}, quantite={self.quantite}, client={self.client}, date={self.date})"
+
+class HistoriqueVentes:
+    def __init__(self, produit, montant, quantite, date, client="Inconnu"):
+          # Montant total de la transaction
+        self.client = client  # Client ayant effectué la transaction
+        self.date = date  # Date et heure de la transaction
+        self.produit = produit  # Produit acheté
+        self.prix = montant
+        self.quantite = quantite
+    
+    
+    def ajouter_vente(self, produit, montant, quantite, client="Inconnu"):
+        vente = Vente(produit, montant, quantite, client)
+        #Vente.insert_one(vente.to_dict())
+        self.db["ventes"].insert_one(vente.to_dict())
+        #add it to ventes
+
+        
+        #self.Ventes.insert_one(vente.to_dict())
+        print(f"Vente ajoutée: {vente}")
+    
+    def afficher_historique(self):
+        ventes = self.collection.find()
+        if ventes.count() == 0:
+            print("Aucune vente enregistrée.")
+        else:
+            for vente in ventes:
+                print(vente)
+    
+    def total_ventes(self):
+        return sum(vente["montant"] * vente["quantite"] for vente in self.collection.find())
+
 # Classe Transaction
-class Transaction:
-    """
-    Classe pour représenter une transaction (vente).
-    """
-    def __init__(self, id_transaction, marchand, client, produits, total):
-        self.id_transaction = id_transaction  # ID unique de la transaction
-        self.marchand = marchand  # Marchand impliqué
-        self.client = client  # Client impliqué
-        self.produits = produits  # Liste des produits achetés
-        self.total = total  # Montant total de la transaction
-
-# Enregistrer cette transaction dans l'historique du marchand
-        self.marchand.enregistrer_transaction(self)
-
-    def afficher_details(self):
-        """
-        Affiche les détails de la transaction.
-        """
-        produits_details = ", ".join([produit.nom for produit in self.produits])
-        return f"Transaction ID: {self.id_transaction}, Client: {self.client.identifiant}, Produits: {produits_details}, Total: {self.total:.2f}"
-
-    def mettre_a_jour_stock(self):
-        """
-        Met à jour le stock du marchand après une transaction.
-        """
-        for produit in self.produits:
-            # On vérifie si le produit existe dans le stock du marchand
-            if produit.nom in self.marchand.stock:
-                # Récupération des informations actuelles du stock
-                stock_produit = self.marchand.stock[produit.nom]
-
-                # Vérification de la quantité demandée
-                if stock_produit["quantite"] >= produit.quantite:
-                    # Réduction de la quantité en stock
-                    self.marchand.stock[produit.nom]["quantite"] -= produit.quantite
-                else:
-                    print(f"Erreur : Stock insuffisant pour {produit.nom}.")
-            else:
-                print(f"Erreur : Le produit {produit.nom} n'est pas dans le stock du marchand.")
-
-
 def notifier(message):
         """
         Système d'alerte simple pour afficher des notifications en temps réel.
