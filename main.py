@@ -9,9 +9,9 @@ import math
 from datetime import datetime
 
 from pymongo import MongoClient
-from _classe import HistoriqueVentes, Produit
+from _classe import  Produit
 from _classe import Marchand
-from _classe import Marche
+from _classe import Marche,Vente
 from _classe import Utilisateur
 
 #from _classe import BaseDeDonnees
@@ -21,6 +21,153 @@ from _classe import afficher_menu
 client = MongoClient("mongodb://localhost:27017/")
 
 
+def trouver_marche(db):
+    return input("Nom du marché : ")
+
+def obtenir_position_client():
+    lat = float(input("Votre position (latitude) : "))
+    lon = float(input("Votre position (longitude) : "))
+    return (lat, lon)
+
+def obtenir_liste_produits(db):
+    liste_produits = []
+    while True:
+        nom_produit = input("Nom du produit souhaité : ")
+        produit = db["produits"].find_one({"nom": nom_produit})
+        if not produit:
+            print(f"Le produit '{nom_produit}' n'existe pas.")
+            continue
+        quantite = int(input(f"Quantité de {nom_produit} : "))
+        liste_produits.append({"nom": nom_produit, "quantite": quantite})
+        if input("Ajouter un autre produit ? (o/n) : ").lower() != "o":
+            break
+    return liste_produits
+
+def verifier_disponibilite_marchands(db, liste_produits):
+    collection_marchands = db["marchands"]
+    collection_produits = db["produits"]
+    
+    for marchand in collection_marchands.find():
+        marchand_id = marchand["_id"]
+        produits_marchand = list(collection_produits.find({"marchand_id": marchand_id}))
+        
+        for produit in produits_marchand:
+            if produit["nom"] in [p["nom"] for p in liste_produits]:
+                print(f"Marchand : {marchand['nom']}")
+                print(f"Produit : {produit['nom']}, Quantité : {produit['quantite']}, Prix : {produit['prix']:.2f} €")
+                
+                if input("Voulez-vous acheter ce produit ? (o/n) : ").lower() == "o":
+                    quantite_demande = next(p["quantite"] for p in liste_produits if p["nom"] == produit["nom"])
+                    if produit["quantite"] >= quantite_demande:
+                        collection_produits.update_one({"_id": produit["_id"]}, {"$inc": {"quantite": -quantite_demande}})
+                        vente = {
+                            "nom_produit": produit["nom"],
+                            "prix_total": produit["prix"] * quantite_demande,
+                            "quantite": quantite_demande,
+                            "marchand_id": marchand_id,
+                            "date": datetime.now()
+                        }
+                        db["ventes"].insert_one(vente)
+                        db["historiques_marchand"].insert_one(vente)
+                        print(f"Achat réussi : {quantite_demande} {produit['nom']} pour {quantite_demande * produit['prix']:.2f} €.")
+                    else:
+                        print("Quantité insuffisante.")
+
+def recommander_marchands(db, liste_produits, position_client):
+    collection_marchands = db["marchands"]
+    collection_produits = db["produits"]
+    recommendations = []
+    
+    for marchand in collection_marchands.find():
+        marchand_id = marchand["_id"]
+        total_cout = 0
+        produits_disponibles = True
+        
+        for demande in liste_produits:
+            produit = collection_produits.find_one({"nom": demande["nom"], "marchand_id": marchand_id})
+            if produit and produit["quantite"] >= demande["quantite"]:
+                total_cout += produit["prix"] * demande["quantite"]
+            else:
+                produits_disponibles = False
+                break
+        
+        if produits_disponibles:
+            distance = math.sqrt((marchand["position"][0] - position_client[0])**2 + (marchand["position"][1] - position_client[1])**2)
+            recommendations.append({
+                "marchand": marchand["nom"],
+                "position": marchand["position"],
+                "distance": distance,
+                "cout_total": total_cout
+            })
+    
+    recommendations.sort(key=lambda x: (x["cout_total"], x["distance"]))
+    print("\n=== Marchands recommandés ===")
+    for rec in recommendations:
+        print(f"- {rec['marchand']} : Coût = {rec['cout_total']:.2f} €, Distance = {rec['distance']:.2f}")
+    
+    return recommendations
+
+
+
+def afficher_statistiques_marche():
+    """Affiche les statistiques d'un marché et de ses marchands."""
+    
+    client = MongoClient("mongodb://localhost:27017/")
+    db = client["market_bd"]
+    
+    while True:
+        nom_marche = input("Nom du marché : ")
+        collection_marches = db["marches"]
+        
+        # Vérifier si le marché existe
+        marche = collection_marches.find_one({"nom_marce": nom_marche})
+        if not marche:
+            print(f"❌ Le marché '{nom_marche}' n'existe pas. Réessayez.\n")
+            continue
+        
+        print(f"\n=== 📊 Statistiques du marché : {nom_marche} ===\n")
+        
+        marche_id = marche["_id"]
+        collection_marchands = db["marchands"]
+        marchands = list(collection_marchands.find({"marchand_id": marche_id}))
+        
+        if not marchands:
+            print("⚠ Aucun marchand trouvé dans ce marché.")
+            continue
+        
+        collection_produits = db["produits"]
+        collection_historiques = db["historiques_marchand"]
+
+        for marchand in marchands:
+            print(f"\n🔹 Marchand : {marchand['nom']}")
+            
+            # Obtenir les produits du marchand
+            produits = list(collection_produits.find({"marchand_id": marchand["_id"]}))
+            nb_produits = len(produits)
+
+            # Obtenir les historiques de ventes du marchand
+            historiques = list(collection_historiques.find({"marchand_id": marchand["_id"]}))
+            nb_vendus = len(historiques)
+            total_ventes = sum(t["prix_total"] for t in historiques)
+
+            print(f"   🏪 Nombre de produits en stock : {nb_produits}")
+            print(f"   🛍 Nombre total de produits vendus : {nb_vendus}")
+            print(f"   💰 Chiffre d'affaires total : {total_ventes:.2f} €\n")
+
+            # Afficher les détails des produits
+            print("   📦 Détails des produits :")
+            for produit in produits:
+                print(f"      - {produit['nom']}: {produit['prix']:.2f} € (Stock: {produit['quantite']})")
+            
+            print("\n" + "-"*50)
+
+        # Option de quitter ou continuer
+        if input("\n🔄 Voulez-vous consulter un autre marché ? (o/n) : ").lower() != "o":
+            continue
+        else:
+            break
+
+#Main function
 def main():
     # Stockage des marchés dans un dictionnaire (clé : nom du marché)
     marches = {}
@@ -30,73 +177,11 @@ def main():
         choix = input("Sélectionnez une option (1-8) : ")
 
         if choix == "1":
-            print("\n=== Création de marchés ===")
-            while True:
-                nom_marche = input("Entrez le nom du marché : ")
-                taille_x = int(input("Entrez la largeur du marché : "))
-                taille_y = int(input("Entrez la longueur du marché : "))
-                
-                #instance of marche
-                marche = Marche(nom_marche, taille_x, taille_y,marchand_id=None) 
-                #insert marche in db
-                client = MongoClient("mongodb://localhost:27017/")
-                db = client["market_bd"]
-                collection = db["marches"]
-                collection.insert_one(marche.__dict__)
-
-                #marches[nom_marche] = Marche(taille_x, taille_y)
-                print(f"Marché '{nom_marche}' créé avec succès.")
-
-                # Demander à l'utilisateur s'il souhaite ajouter un autre marché
-                continuer = input("Voulez-vous créer un autre marché ? (o/n) : ").lower()
-                if continuer != "o":
-                    break
-                
+            Marche.creer_marche()
 
         elif choix == "2":
             print("\n=== Ajout d'un marchand ===")
-
-            #nom_marche = input("Nom du marché : ")
-            #obtenir marche
-            #choose the market where to add the marchand
-            client = MongoClient("mongodb://localhost:27017/")
-            db = client["market_bd"]
-            
-            collection = db["marches"]
-            
-            #  listemarche disponible
-            print("Les marchés disponibles sont :")
-            for doc in collection.find():
-                i=1
-                print(f"{i}. {doc['nom_marce']}")
-                i+=1
-            #choose the market
-            nom_marche = input("Entrer le nom du marche du marchand : ")
-            #obtenir marche
-            db = client["market_bd"]
-            collection = db["marches"]
-            marche = collection.find_one({"nom_marce": nom_marche})
-            print(marche)
-            if not marche:
-                print(f"Le marché '{nom_marche}' n'existe pas.")
-                continue
-            marche_id = marche["_id"]
-            nom_marchand = input("Nom du marchand : ")
-            position_x = int(input("Position X du marchand : "))
-            position_y = int(input("Position Y du marchand : "))
-            marchand = Marchand(nom_marchand, (position_x, position_y), marche_id)
-
-            #add marchand to the marchand
-            marchand_id = db["marchands"].insert_one(marchand.__dict__).inserted_id
-            detail_marchand = {"nom": nom_marchand, "position": (position_x, position_y),"marchand_id": marchand_id}
-            #add marchand  detail_marchand in marche in db
-            db["marches"].update_one(
-            {"nom_marce": nom_marche},  # Query to find the document
-            {"$set": {f"detail_marchand.{nom_marchand}": detail_marchand}} )
-       
-        
-            #marche.ajouter_marchand(marchand)
-            notifier(f"Marchand '{nom_marchand}' ajouté au marché '{nom_marche}'.")
+            Marche.ajouter_marchand()
             #voulez vous ajouter des produit pour ce marchand
             choix_produit = input("Voulez-vous ajouter des produits pour ce marchand ? (o/n) : ").lower()
             if choix_produit == "o":
@@ -121,149 +206,66 @@ def main():
 
         elif choix == "3":
             print("\n=== Ajout de produits ===")
-
-            db = client["market_bd"]
-            collection = db["marches"]
-            #  listemarche disponible
-            print("Les marchés disponibles sont :")
-            for doc in collection.find():
-                i=1
-                print(f"{i}. {doc['nom_marce']}")
-                i+=1
-            #choose the market
-            nom_marche = input("Nom du marché : ")
-            #verifier si le marchan =t existe
-
-            marche = collection.find_one({"nom_marce": nom_marche})
-            if not marche:
-                print(f"Le marché '{nom_marche}' n'existe pas.")
-                continue
-            nom_marchand = input("Nom du marchand : ")
-            #verifier si le marchand existe
-            marchand = db["marchands"].find_one({"nom": nom_marchand})
-            #get the id of the marchand
-
-            if not marchand:
-                print(f"Aucun marchand nommé '{nom_marchand}' trouvé dans le marché '{nom_marche}'.")
-                continue
-            while True:
-                nom_produit = input("Nom du produit : ")
-                prix = float(input(f"Prix de {nom_produit} : "))
-                quantite = int(input(f"Quantité de {nom_produit} : "))
-                produit = Produit(nom_produit, prix, quantite, marchand["_id"])
-                db["produits"].insert_one(produit.__dict__)
-                
-                notifier(f"Produit '{nom_produit}' ajouté au stock de '{nom_marchand}'.")
-
-                continuer = input("Ajouter un autre produit ? (o/n) : ").lower()
-                if continuer != "o":
-                    break
-                else:
-                        continue
+            Produit.ajouter_produit()
 
         elif choix == "4":
             client = MongoClient("mongodb://localhost:27017/")
             db = client["market_bd"]
-
+            
             print("\n=== Simulation d'achat ===")
-            nom_marche = input("Nom du marché : ")
-
-            # Vérifier si le marché existe
-            collection_marches = db["marches"]
-            marche = collection_marches.find_one({"nom_marce": nom_marche})
-            print('marche',marche)
-            if not marche:
-                print(f"Le marché '{nom_marche}' n'existe pas.")
-            else:
-                position_client = (
-                    int(input("Position X du client : ")),
-                    int(input("Position Y du client : "))
-                )
-                liste_produits = []
-                while True:
-                    nom_produit = input("Nom du produit souhaité : ")
-                    #check if the product exists in the db
-                    produit = db["produits"].find_one({"nom": nom_produit})
-                    if not produit:
-                        print(f"Le produit '{nom_produit}' n'existe pas.")
-                        continue
-                    quantite = int(input(f"Quantité de {nom_produit} : "))
-                    liste_produits.append({"nom": nom_produit, "quantite": quantite})
-                    continuer = input("Ajouter un autre produit ? (o/n) : ").lower()
-                    if continuer != "o":
-                        break
-
-                # Trouver les marchands et vérifier la disponibilité des produits
-                collection_marchands = db["marchands"]
-                collection_produits = db["produits"]
-                
-                for marchand in collection_marchands.find():
-                    marchand_id = marchand["_id"]
-                    produits_marchand = list(collection_produits.find({"marchand_id": marchand_id}))
-                    
-                    for produit in produits_marchand:
-                        if produit["nom"] in [p["nom"] for p in liste_produits]:
-                            print(f"Marchand : {marchand['nom']}")
-                            print(f"Produit : {produit['nom']}, Quantité : {produit['quantite']}, Prix : {produit['prix']:.2f} €")
-                            
-                            acheter = input("Voulez-vous acheter ce produit ? (o/n) : ").lower()
-                            if acheter == "o":
-                                quantite_demande = next(p["quantite"] for p in liste_produits if p["nom"] == produit["nom"])
-                                print("Requested quantity:", quantite_demande)
-                                if produit["quantite"] >= quantite_demande:
-                                    collection_produits.update_one({"_id": produit["_id"]}, {"$inc": {"quantite": -quantite_demande}})
-                                    historique_vente = {
-                                        "nom_produit": produit["nom"],
-                                        "prix_total": produit["prix"] * quantite_demande,
-                                        "quantite": quantite_demande,
-                                        "marchand_id": marchand_id,
-                                        "date": datetime.now()
-                                    }
-                                    db["historiques_marchand"].insert_one(historique_vente)
-                                    print(f"Vous avez acheté {quantite_demande} {produit['nom']} pour {quantite_demande * produit['prix']:.2f} €.")
-                                else:
-                                    print("Quantité insuffisante.")
-
-                # Recommandations
-                recommendations = []
-                for marchand in collection_marchands.find():
-                    marchand_id = marchand["_id"]
-                    total_cout = 0
-                    produits_disponibles = True
-
-                    for demande in liste_produits:
-                        produit = collection_produits.find_one({"nom": demande["nom"], "marchand_id": marchand_id})
-                        if produit and produit["quantite"] >= demande["quantite"]:
-                            total_cout += produit["prix"] * demande["quantite"]
-                        else:
-                            produits_disponibles = False
-                            break
-
-                    if produits_disponibles:
-                        distance = math.sqrt((marchand["position"][0] - position_client[0])**2 + (marchand["position"][1] - position_client[1])**2)
-                        recommendations.append({
-                            "marchand": marchand["nom"],
-                            "position": marchand["position"],
-                            "distance": distance,
-                            "cout_total": total_cout
-                        })
-
-                recommendations.sort(key=lambda x: (x["cout_total"], x["distance"]))
-                print("\n=== Marchands recommandés ===")
+            nom_marche = trouver_marche(db)
+            position_client = obtenir_position_client()
+            liste_produits = obtenir_liste_produits(db)
+            
+            verifier_disponibilite_marchands(db, liste_produits)
+            recommendations = recommander_marchands(db, liste_produits, position_client)
+            print(recommendations)
+            if input("\nSouhaitez-vous valider cet achat ? (o/n) : ").lower() == "o":
                 for rec in recommendations:
-                    print(f"- {rec['marchand']} : Coût = {rec['cout_total']:.2f} €, Distance = {rec['distance']:.2f}")
+                    marchand_id = db["marchands"].find_one({"nom": rec["marchand"]})["_id"]
+                    
+                    for demande in liste_produits:
+                        produit = db["produits"].find_one({"nom": demande["nom"], "marchand_id": marchand_id})
 
-                choix_validation = input("\nSouhaitez-vous valider cet achat ? (o/n) : ").lower()
-                if choix_validation == "o":
-                    print("Transaction validée. Stock mis à jour.")
-                else:
-                    print("Transaction annulée.")
+                        if produit and produit["quantite"] >= demande["quantite"]:
+                            # Mise à jour de la quantité du produit
+                            db["produits"].update_one(
+                                {"_id": produit["_id"]},
+                                {"$inc": {"quantite": -demande["quantite"]}}
+                            )
+
+                            # Enregistrement de la vente
+                            vente = {
+                                "nom_produit": produit["nom"],
+                                "prix_total": produit["prix"] * demande["quantite"],
+                                "quantite": demande["quantite"],
+                                "marchand_id": marchand_id,
+                                "date": datetime.now()
+                            }
+                            db["ventes"].insert_one(vente)
+
+                            # Ajout de l'historique du marchand
+                            historique_vente = {
+                                "nom_produit": produit["nom"],
+                                "prix_total": produit["prix"] * demande["quantite"],
+                                "quantite": demande["quantite"],
+                                "marchand_id": marchand_id,
+                                "date": datetime.now()
+                            }
+                            db["historiques_marchand"].insert_one(historique_vente)
+
+                            print(f"✅ {demande['quantite']} {produit['nom']} achetés chez {rec['marchand']} pour {vente['prix_total']:.2f} €.")
+                
+                print("Transaction validée. Stock mis à jour.")
+            else:
+                print("Transaction annulée.")
 
 
 
         elif choix == "5":
 
             print("\n=== Statistiques des marchands ===")
+            afficher_statistiques_marche()
 
             while True:
                 nom_marche = input("Nom du marché : ")
@@ -430,21 +432,36 @@ def main():
             # Compter le nombre de marchands par marché
             marchands_par_marche = df_marchands.groupby("marchand_id").size().reset_index(name="Nombre de marchands")
 
+
             # Fusionner avec les marchés pour avoir les noms
             marchands_par_marche = marchands_par_marche.merge(df_marches, left_on="marchand_id", right_on="_id")
             print("marchands_par_marche",marchands_par_marche)
 
-            fig = px.bar(marchands_par_marche, x="nom", y="Nombre de marchands", title="Nombre de marchands par marché", 
-                        labels={"nom": "Marché", "Nombre de marchands": "Nombre de Marchands"}, color="Nombre de marchands")
+            fig = px.bar(marchands_par_marche, x="nom_marce", y="Nombre de marchands", title="Nombre de marchands par marché", 
+                        labels={"nom_marce": "Marché", "Nombre de marchands": "Nombre de Marchands"}, color="Nombre de marchands")
+            #image show 
+            fig.write_image("marchands_par_marche.png")
             fig.show()
+            # Fermer la connexion   
+            df_marchands["position_x"] = df_marchands["position"].apply(lambda pos: pos[0] if isinstance(pos, list) else None)
+            df_marchands["position_y"] = df_marchands["position"].apply(lambda pos: pos[1] if isinstance(pos, list) else None)
+
+            print("Poition",df_marchands["position"].head())
+
+
             fig = px.scatter(df_marchands, x="position_x", y="position_y", color="nom", hover_data=["nom"],
                  title="Répartition géographique des marchands")
+
+            #image show
+            fig.write_image("marchands_geographie.png")
             fig.show()
             # Stock total par produit
             stock_produit = df_produits.groupby("nom")["quantite"].sum().reset_index()
 
             fig = px.bar(stock_produit, x="nom_marce", y="quantite", title="Stock total par produit", 
                         labels={"nom": "Produit", "quantite": "Stock"}, color="quantite")
+            #image show
+            fig.write_image("stock_produit.png")
             fig.show()
 
 

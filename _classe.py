@@ -18,6 +18,53 @@ class Produit:
         self.prix = prix  # Prix unitaire du produit
         self.quantite = quantite  
         self.marchand_id = marchand_id 
+        
+    @staticmethod
+    def ajouter_produit():
+        client = MongoClient("mongodb://localhost:27017/")
+        db = client["market_bd"]
+
+        # Sélection du marchand
+        nom_marchand = input("Nom du marchand : ")
+        marchand = db["marchands"].find_one({"nom": nom_marchand})
+
+        if not marchand:
+            print(f"Le marchand '{nom_marchand}' n'existe pas.")
+            client.close()
+            return
+        
+        marchand_id = marchand["_id"]
+
+        while True:
+            # Saisie des informations du produit
+            nom_produit = input("Nom du produit : ")
+            try:
+                prix = float(input(f"Prix de {nom_produit} : "))
+                quantite = int(input(f"Quantité de {nom_produit} : "))
+            except ValueError:
+                print("Veuillez entrer un prix et une quantité valides.")
+                continue  # Recommence la boucle si une erreur est détectée
+
+            # Création et insertion du produit
+            produit = Produit(nom_produit, prix, quantite, marchand_id)
+            db["produits"].insert_one(produit.__dict__)
+
+            # Notification
+            notifier(f"Produit '{nom_produit}' ajouté au stock de '{nom_marchand}'.")
+
+            # Demander si l'utilisateur veut ajouter un autre produit
+            continuer = input("Ajouter un autre produit ? (o/n) : ").lower()
+            if continuer != "o":
+                break
+
+        client.close()
+
+    
+    if __name__ == "__main__":
+        marchand_id = "id_du_marchand"  # Remplacer par l'ID réel
+        nom_marchand = "Nom du marchand"  # Remplacer par le nom réel
+        ajouter_produit(marchand_id, nom_marchand)
+
 
     def afficher_details(self):
         """
@@ -51,6 +98,9 @@ class Marchand:
         self.historique_ventes = [] 
         self.marchand_id =marchand_id
         # Historique des transactions
+    @staticmethod
+    def get_marchand_id(db):
+        return db["marchands"].find_one({})["_id"]
 
     def ajouter_produit(self, produit):
         """
@@ -126,6 +176,33 @@ class Marche:
         # Longueur du marché
         self.marchand_id = marchand_id
 
+    @staticmethod
+    def creer_marche():
+        print("\n=== Création de marchés ===")
+        
+        client = MongoClient("mongodb://localhost:27017/")
+        db = client["market_bd"]
+        collection = db["marches"]
+        
+        while True:
+            nom_marche = input("Entrez le nom du marché : ")
+            try:
+                taille_x = int(input("Entrez la largeur du marché : "))
+                taille_y = int(input("Entrez la longueur du marché : "))
+            except ValueError:
+                print("Veuillez entrer des nombres valides pour les dimensions.")
+                continue
+
+            marche = Marche(nom_marche, taille_x, taille_y, marchand_id=ObjectId()) 
+            collection.insert_one(marche.__dict__)
+
+            print(f"Marché '{nom_marche}' créé avec succès.")
+
+            continuer = input("Voulez-vous créer un autre marché ? (o/n) : ").lower()
+            if continuer != "o":
+                break
+
+        client.close()
         
         
           # Dictionnaire des positions des marchands
@@ -136,9 +213,88 @@ class Marche:
         # recuperer les postions des marchands dans le marche
         return list(db["Marche"].find())
     
+    @staticmethod
+    def ajouter_marchand():
+        client = MongoClient("mongodb://localhost:27017/")
+        db = client["market_bd"]
+        collection = db["marches"]
+
+        # Liste des marchés disponibles
+        print("Les marchés disponibles sont :")
+        marche_liste = list(collection.find())
+        if not marche_liste:
+            print("Aucun marché disponible.")
+            return
+
+        for i, doc in enumerate(marche_liste, start=1):
+            print(f"{i}. {doc['nom_marce']}")
+
+        # Choisir un marché
+        while True:
+            nom_marche = input("Entrer le nom du marché du marchand : ")
+            
+            # Obtenir le marché
+            marche = collection.find_one({"nom_marce": nom_marche})
+            if not marche:
+                print(f"Le marché '{nom_marche}' n'existe pas.")
+            else:
+                break
+        
+        marchand_id = marche["_id"]
+        
+        # Saisie des informations du marchand
+        nom_marchand = input("Nom du marchand : ")
+        
+        try:
+            position_x = int(input("Position X du marchand : "))
+            position_y = int(input("Position Y du marchand : "))
+        except ValueError:
+            print("Veuillez entrer des valeurs numériques pour les positions.")
+            return
+    
+    
+    
+    # Ajouter le marchand dans la collection "marchands"
+        #marchand_id = db["marchands"].insert_one(marchand.__dict__).inserted_id
+        detail_marchand = {
+            "nom": nom_marchand, 
+            "position": (position_x, position_y), 
+            "marchand_id": marchand_id
+        }
+        db["marchands"].insert_one(detail_marchand)
+        
+        
+    # Mettre à jour le marché avec le marchand ajouté
+    
+
+        print(f"Le marchand '{nom_marchand}' a été ajouté avec succès au marché '{nom_marche}'.")
+
+        choix_produit = input("Voulez-vous ajouter des produits pour ce marchand ? (o/n) : ").lower()
+        if choix_produit == "o":
+            while True:
+                
+                nom_produit = input("Nom du produit : ")
+                prix = float(input(f"Prix de {nom_produit} : "))
+                quantite = int(input(f"Quantité de {nom_produit} : "))
+                produit = Produit(nom_produit, prix, quantite, marchand_id)
+                db["produits"].insert_one(produit.__dict__)
+                
+                notifier(f"Produit '{nom_produit}' ajouté au stock de '{nom_marchand}'.")
+
+                continuer = input("Ajouter un autre produit ? (o/n) : ").lower()
+                if continuer != "o":
+                    break
+                else:
+                    continue
+        
+        client.close()  
+
+
+
+    
     def recuperer_tous_marchands(db):
         return list(db["marchands"].find())
-    def ajouter_marchand(self, marchand,db):
+    def ajoutermarchand(self, marchand,db):
         """
         Ajoute un marchand à une position unique dans le marché.
         """
